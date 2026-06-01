@@ -1,0 +1,7 @@
+ccxt>=4.0.0
+python-dotenv>=1.0.0
+pandas>=2.0.0
+pyarrow>=14.0.0
+streamlit>=1.40.0
+plotly>=5.18.0
+pyxirr>=0.10.0
