@@ -124,7 +124,7 @@ if page == "概览":
     col = "total_value_usd" if metric == "总净值" else "nav_per_unit"
     fig = px.area(s, x="date", y=col, title=metric)
     fig.update_traces(line_color="#2563eb")
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig)
 
 # ---------- 持仓 ----------
 elif page == "持仓":
@@ -260,7 +260,7 @@ elif page == "定期报表":
             pie = go.Figure(go.Pie(labels=list(r["allocation"]),
                                    values=list(r["allocation"].values()), hole=0.4))
             pie.update_layout(title="期末资产配置")
-            st.plotly_chart(pie, width='stretch')
+            st.plotly_chart(pie)
 
     st.subheader("LP 对账单")
     inv = load("investors")
