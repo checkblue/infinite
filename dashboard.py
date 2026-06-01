@@ -93,6 +93,44 @@ def apply_cost_overrides(h):
     return h2, applied
 
 
+@st.cache_data(ttl=60, show_spinner="拉取最新现价…")
+def live_prices(assets):
+    """实时拉取最新现价（缓存 60s）。返回 (prices, error)；失败回退空 dict。
+
+    assets 传 tuple 以便缓存。无凭据/无网络/demo 模式会抛错被捕获 → 回退快照价。
+    """
+    import okx_client
+    try:
+        ex = okx_client.make_exchange()
+        return okx_client.fetch_prices(ex, list(assets)), None
+    except Exception as e:  # noqa: BLE001 — 任何失败都静默回退快照价
+        return {}, str(e)
+
+
+def apply_live_prices(h, prices):
+    """对当前持仓套用最新现价，重算市值/未实现盈亏/质押收益市值/占比。
+
+    返回 (h2, applied)；prices 里没有或非正的资产保持快照原值。
+    """
+    h2 = h.copy()
+    applied = []
+    for i, r in h2.iterrows():
+        p = prices.get(r["asset"])
+        if p is None or p <= 0:
+            continue
+        amt = float(r["amount"])
+        reward = float(r.get("staking_reward_amount", 0.0) or 0.0)
+        h2.at[i, "price_usd"] = p
+        h2.at[i, "value_usd"] = amt * p
+        h2.at[i, "unrealized_pnl_usd"] = amt * p - float(r["cost_basis_usd"])
+        h2.at[i, "staking_reward_value_usd"] = reward * p
+        applied.append(r["asset"])
+    total = h2["value_usd"].sum()
+    if total > 0:  # 现价变了，占比要跟着重算
+        h2["weight"] = h2["value_usd"] / total
+    return h2, applied
+
+
 st.sidebar.title("📊 无限私募金")
 page = st.sidebar.radio("导航", ["概览", "持仓", "投资人 / 份额", "定期报表", "收益分配", "赎回测算"])
 snap = latest_snapshot()
@@ -141,7 +179,14 @@ elif page == "持仓":
         if view == "当前持仓":
             h = h_all[h_all["date"].dt.date == dates[0]].copy()
             h, applied = apply_cost_overrides(h)
-            st.caption(f"快照日 {dates[0]}（现价为该日收盘）")
+            if st.button("🔄 刷新现价"):
+                live_prices.clear()
+            prices, price_err = live_prices(tuple(sorted(h["asset"].unique())))
+            if prices:
+                h, _ = apply_live_prices(h, prices)
+                st.caption(f"快照日 {dates[0]}｜✅ 现价已实时更新（USDT 恒为 1；缓存 60s，点上方按钮强制刷新）")
+            else:
+                st.caption(f"快照日 {dates[0]}（现价取自该日收盘；实时取价不可用：{price_err or '缺凭据或网络'}）")
             if applied:
                 st.caption(f"✅ 已实时套用手动成本：{', '.join(applied)}　（仅显示用，落库以下次 collector 为准）")
         else:
