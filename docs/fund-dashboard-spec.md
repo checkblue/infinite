@@ -1,6 +1,6 @@
 # 区块链私募基金 — 资金看板与投资人报表 设计文档
 
-> 版本：v0.5（分配参数全部确认，可进入开发）
+> 版本：v0.6（已接真实账户；质押收益口径全部确认并落地）
 > 基金：无限数字资产私募基金一期 ｜ 期限：5 年 ｜ 计价：USD（稳定币 USDT/USDC ≈ $1）
 > 初始规模：100,000 USD（PP 80,000 + CC 20,000，均为 GP）｜ 认缴：USDT/USDC
 
@@ -34,7 +34,7 @@
 | 6 | 快照时间 | 每日东八区 0:00（UTC+8） |
 | 7 | 手续费 | 折算成 USD 计入成本 |
 | 8 | 灰尘资产 | 市值 < 1 USD 完全忽略（不计净值、不显示） |
-| 9 | 质押收益来源 | OKX 账单接口；type/subType 调试时打印确认；3 个月前用归档回填 |
+| 9 | 质押收益来源 | **资金账户账单 asset/bills**（type 328/139/89，已确认）作流水审计；累计值以 **Earn staking-defi 余额接口 totalInterestAccrual**（lifetime）为准，规避账单仅 3 个月的丢失 |
 | 10 | 收益分配 | 瀑布制（见 §4.7）：先回本 → LP 优先收益 → 超额 GP/LP 分成；**无管理费、无单独业绩报酬** |
 | 11 | 披露周期 | 日报（总资产/收益）、月报（NAV）、季度/半年度/年度报表 |
 
@@ -73,8 +73,20 @@ X 轴日期，Y 轴可切换「总净值 USD」或「单位净值 NAV」。数�
 ### 4.3 成本价与盈亏
 买入加权均价（手续费折 USD 计入）；无历史时手填并持久化、优先采用；质押所得按 0 成本（§7.3）。
 
-### 4.4 质押收益
-通过 OKX 账单接口（ccxt `fetch_ledger`）每日增量抓取，按 `billId` 去重累计；3 个月前用归档回填。质押属内部收益，**不计入现金流 / XIRR**，仅作收益归因展示。
+### 4.4 质押收益（口径已确认并落地）
+质押/理财收益以收益币种发放到**资金账户**，仅在资金账户账单 `asset/bills` 可见（交易账户账单 `fetch_ledger` 只有买卖、无收益）。已确认类型码：
+
+| type | notes | 含义 | 收益币种 |
+| --- | --- | --- | --- |
+| 328 | SOL Staking earnings | SOL 质押收益 | OKSOL |
+| 139 | ETH Staking earnings | ETH 质押收益 | BETH |
+| 89 | On-chain Earn earnings | 链上理财收益 | USDT 等 |
+
+- **识别**：type 码命中 `STAKING_REWARD_BILL_TYPES` **或** notes 含 `earning`（双保险）。
+- **流水**：账单按 `billId` 去重，每日增量持久化到 `staking_rewards`（审计用）。
+- **累计口径**：账单仅近 3 个月会漏早期收益，故 OKSOL/BETH 这类有 Earn 持仓的，**累计收益以 Earn `staking-defi` 余额接口的 `totalInterestAccrual`（lifetime 权威值）为准**；无对应 Earn 接口的（USDT 链上理财）回退账单累计。
+- **流动质押币**（`STAKING_TOKENS = {OKSOL, BETH}`）：整笔持仓即质押本金（复投，1 SOL=1 OKSOL，收益滚入再生息），其「已质押数量」= 该资产总持仓。
+- 质押属内部收益，**不计入现金流 / XIRR**，仅作收益归因与 0 成本计入。
 
 ### 4.5 单位净值与投资人份额（新增）
 - 每日计算并存储 NAV/份 与总份额。
@@ -130,9 +142,10 @@ X 轴日期，Y 轴可切换「总净值 USD」或「单位净值 NAV」。数�
 | 行情 | `fetch_tickers()` | 批量估值；USDT/USDC 记 1 |
 | 成交历史 | `fetch_my_trades(symbol)` | 算成本，需翻页 |
 | 充值/提现 | `fetch_deposits()` / `fetch_withdrawals()` | 外部现金流，校验申赎记录 |
-| 账单（质押收益） | `fetch_ledger(code, params={'paginate':True})` | OKX bills，仅近 3 个月，需每日增量 + 归档回填 |
+| 资金账户账单（质押收益流水） | `privateGetAssetBills({limit})` | OKX asset/bills，含 type 328/139/89 收益；仅近 3 个月，每日增量 + billId 去重 |
+| 质押 lifetime 累计收益 | `privateGetFinanceStakingDefi{Sol,Eth}Balance` | 取 `totalInterestAccrual`，作累计权威值（规避账单 3 个月窗口） |
 
-要点：`billId` 去重；type/subType 先打印观察；交易账户与资金账户两套账单都查；`enableRateLimit:True`；密钥走环境变量、只读权限。
+要点：`billId` 去重；质押收益在**资金账户账单**（非交易账户 `fetch_ledger`）；累计以 Earn 接口 `totalInterestAccrual` 为准；`enableRateLimit:True`；密钥走环境变量、只读权限；OKX 受限地区走 `OKX_PROXY` 代理。
 
 ---
 
@@ -144,7 +157,8 @@ X 轴日期，Y 轴可切换「总净值 USD」或「单位净值 NAV」。数�
 date(主键), total_value_usd, trading_value_usd, funding_value_usd, **total_units, nav_per_unit**, net_external_flow_usd（不含质押收益）, cumulative_inflow_usd, pnl_usd, created_at
 
 ### 6.2 `holdings`（多行/天）
-date, asset, amount(含质押), price_usd, value_usd, cost_price_usd, cost_basis_usd, unrealized_pnl_usd, staking_amount, staking_value_usd, weight（占比，用于集中度）
+date, asset, amount(含质押), price_usd, value_usd, cost_price_usd, cost_basis_usd, unrealized_pnl_usd, **staking_amount（已质押数量：流动质押币=整仓持仓，其余=累计收益）**, staking_value_usd, **staking_reward_amount（累计质押收益数量，0 成本）**, **staking_reward_value_usd**, weight（占比，用于集中度）
+> 成本基数 = cost_price ×（amount − staking_reward_amount）：质押收益部分 0 成本。
 
 ### 6.3 `investors`（投资人台账）
 investor_id(主键), name, role(GP/LP), join_date, gp_carry_weight(GP 在 carry 池中的权重), note
@@ -172,7 +186,7 @@ period_key(如 2026Q1/2026H1/2026FY/2026-03), period_start, period_end, nav_star
 
 - **7.1 估值**：总净值 = Σ(交易账户+资金账户 各币种×现价)，剔除 <1 USD；稳定币记 1。
 - **7.2 加权成本**：买入 `新成本=(原量×原成本+买入额+手续费)/总量`；卖出按成本结转；手续费折 USD。
-- **7.3 质押成本**：按 0 成本计入；持仓成本仅来自买入；未实现盈亏 = 市值 − 持仓成本。
+- **7.3 质押成本**：累计质押收益按 0 成本计入；`持仓成本 = cost_price ×（总数量 − 累计质押收益）`；未实现盈亏 = 市值 − 持仓成本。流动质押币（OKSOL/BETH）整仓为质押本金。
 - **7.4 单位净值**：`NAV/份 = 总净值 / 总份额`，每日存储。申购 `units=金额/当时NAV份`；赎回 `退款=份额×月末NAV份×(1−折价)`。
 - **7.5 XIRR（自起投）**：`pyxirr.xirr(dates, amounts)`，质押收益不入现金流。
 - **7.6 TWR（报表期间）**：按外部现金流分段，`r_k=V(流入前)/V(上段末)−1`，`TWR=∏(1+r_k)−1`；期间年化 `(1+TWR)^(365/天数)−1`。
@@ -257,6 +271,6 @@ API Key 只读；密钥仅本地 `.env` 入 `.gitignore`；看板仅本地，远
 | 初始 NAV/份 | 1.0000（总份额 100,000，PP 80,000 份 / CC 20,000 份） |
 | 赎回折价 | 固定 10% |
 | 报表周期 | 自然月 / 季 / 半年 / 年 |
-| 质押收益账单码 | 调试时打印实际返回确认（不硬编码） |
+| 质押收益账单码 | **已确认**：资金账单 type 328(OKSOL)/139(BETH)/89(USDT)；累计以 Earn `totalInterestAccrual` 为准 |
 
-> 唯一保留到实现阶段确认的是质押收益的 `type/subType` 码——这只能在接上真实账户后看实际返回才能定。其余参数均已锁定，可据此初始化 `distribution_config` 与 `investors` 表。
+> 质押收益的 `type` 码已在接真实账户后确认（328/139/89），累计口径改以 Earn `totalInterestAccrual` 为准（见 §4.4）。全部参数锁定，系统已落地运行。
