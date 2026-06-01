@@ -11,7 +11,7 @@ import distribution
 import reports
 import units as units_mod
 
-st.set_page_config(page_title="私募基金资金看板", layout="wide")
+st.set_page_config(page_title="无限私募金资金看板", layout="wide")
 
 
 @st.cache_data(ttl=60)
@@ -93,7 +93,7 @@ def apply_cost_overrides(h):
     return h2, applied
 
 
-st.sidebar.title("📊 基金看板")
+st.sidebar.title("📊 无限私募金")
 page = st.sidebar.radio("导航", ["概览", "持仓", "投资人 / 份额", "定期报表", "收益分配", "赎回测算"])
 snap = latest_snapshot()
 if snap is None:

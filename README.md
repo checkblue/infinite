@@ -1,6 +1,6 @@
-# 私募基金资金看板
+# 无限私募金资金看板
 
-OKX 私募基金（GP/LP 合伙制，份额制）资金看板与投资人报表系统。Python + ccxt + Parquet + Streamlit。
+无限私募金 · OKX 私募基金（GP/LP 合伙制，份额制）资金看板与投资人报表系统。Python + ccxt + Parquet + Streamlit。
 
 ## 功能
 - 每日总净值 / 单位净值（NAV）曲线
